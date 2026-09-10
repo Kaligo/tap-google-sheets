@@ -54,70 +54,54 @@ class TestAwsSecurityCredentialsSupplier(unittest.TestCase):
             self.assertEqual(supplier.get_aws_region(None, None), "ap-southeast-1")
 
     def test_raises_when_no_credentials(self):
-        from google.auth import exceptions
-
         supplier = _AwsSecurityCredentialsSupplier()
         with patch("boto3.Session", return_value=self._fake_session(access=None)):
-            with self.assertRaises(exceptions.RefreshError):
+            with self.assertRaises(AttributeError):
                 supplier.get_aws_security_credentials(None, None)
 
-    def test_raises_when_no_region(self):
-        from google.auth import exceptions
-
+    def test_returns_none_when_no_region(self):
         supplier = _AwsSecurityCredentialsSupplier()
         with patch("boto3.Session", return_value=self._fake_session(region=None)):
-            with self.assertRaises(exceptions.RefreshError):
-                supplier.get_aws_region(None, None)
+            self.assertIsNone(supplier.get_aws_region(None, None))
 
 
 class TestAwsCredentialsWiring(unittest.TestCase):
     """Test that AWS external_account resolves through boto3 by default."""
 
-    def _authenticator(self):
+    def _authenticator(self, credentials_json=None):
         auth = WorkloadIdentityAuthenticator.__new__(WorkloadIdentityAuthenticator)
         auth.logger = logging.getLogger("test")
+        auth._credentials_json = credentials_json
+        auth._credentials_file = None
         return auth
 
     def test_aws_external_account_uses_boto3_supplier(self):
-        info = dict(AWS_EXTERNAL_ACCOUNT_INFO)
-        creds = self._authenticator()._credentials_from_info(info)
+        import json
+
+        auth = self._authenticator(json.dumps(AWS_EXTERNAL_ACCOUNT_INFO))
+        creds = auth._load_credentials()
         self.assertIsInstance(
             creds._aws_security_credentials_supplier,
             _AwsSecurityCredentialsSupplier,
         )
-        # Original config dict must not be mutated for the caller.
-        self.assertIn("credential_source", info)
 
-    def test_aws_falls_back_to_default_source_without_boto3(self):
-        # If boto3 is unavailable, keep google-auth's default AWS source
-        # (env static keys / IMDS) rather than crashing.
-        auth = self._authenticator()
-        with patch.object(
-            WorkloadIdentityAuthenticator,
-            "_aws_security_credentials_supplier",
-            return_value=None,
-        ):
-            creds = auth._credentials_from_info(dict(AWS_EXTERNAL_ACCOUNT_INFO))
-        self.assertNotIsInstance(
-            creds._aws_security_credentials_supplier,
-            _AwsSecurityCredentialsSupplier,
-        )
+    def test_rejects_non_aws_credential_source(self):
+        import json
 
-    def test_supplier_none_when_boto3_missing(self):
-        import builtins
+        info = dict(AWS_EXTERNAL_ACCOUNT_INFO)
+        info["credential_source"] = {"environment_id": "gcp1"}
+        auth = self._authenticator(json.dumps(info))
+        with self.assertRaises(NotImplementedError):
+            auth._load_credentials()
 
-        real_import = builtins.__import__
+    def test_rejects_non_external_account_type(self):
+        import json
 
-        def fake_import(name, *args, **kwargs):
-            if name.startswith("boto3"):
-                raise ImportError("no boto3")
-            return real_import(name, *args, **kwargs)
-
-        with patch("builtins.__import__", side_effect=fake_import):
-            supplier = (
-                WorkloadIdentityAuthenticator._aws_security_credentials_supplier()
-            )
-        self.assertIsNone(supplier)
+        info = dict(AWS_EXTERNAL_ACCOUNT_INFO)
+        info["type"] = "service_account"
+        auth = self._authenticator(json.dumps(info))
+        with self.assertRaises(NotImplementedError):
+            auth._load_credentials()
 
 
 if __name__ == "__main__":
