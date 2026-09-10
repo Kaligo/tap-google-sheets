@@ -3,7 +3,10 @@
 import json
 from datetime import datetime
 
+import boto3
 import requests
+from google.auth.aws import AwsSecurityCredentials, Credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from singer_sdk.authenticators import (
     APIAuthenticatorBase,
     OAuthAuthenticator,
@@ -103,15 +106,10 @@ class _AwsSecurityCredentialsSupplier:
     credential source can't resolve them on EKS/IRSA."""
 
     def get_aws_security_credentials(self, context, request):
-        import boto3
-        from google.auth.aws import AwsSecurityCredentials
-
         frozen = boto3.Session().get_credentials().get_frozen_credentials()
         return AwsSecurityCredentials(frozen.access_key, frozen.secret_key, frozen.token)
 
     def get_aws_region(self, context, request):
-        import boto3
-
         return boto3.Session().region_name
 
 
@@ -131,8 +129,6 @@ class WorkloadIdentityAuthenticator(APIAuthenticatorBase, metaclass=SingletonMet
         self._google_credentials = None
 
     def _load_credentials(self):
-        from google.auth.aws import Credentials
-
         if self._credentials_file:
             with open(self._credentials_file) as f:
                 info = json.load(f)
@@ -155,8 +151,6 @@ class WorkloadIdentityAuthenticator(APIAuthenticatorBase, metaclass=SingletonMet
 
     def authenticate_request(self, request):
         """Authenticate the request with a fresh WIF access token."""
-        from google.auth.transport.requests import Request as GoogleAuthRequest
-
         if self._google_credentials is None:
             self._google_credentials = self._load_credentials()
         if not self._google_credentials.valid:
