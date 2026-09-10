@@ -163,7 +163,6 @@ class WorkloadIdentityAuthenticator(APIAuthenticatorBase, metaclass=SingletonMet
                 info = json.load(f)
         else:
             info = json.loads(self._credentials_json)
-        self.logger.info(f"credential info: {info}")
         return self._credentials_from_info(info)
 
     @staticmethod
